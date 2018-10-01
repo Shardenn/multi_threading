@@ -4,12 +4,14 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include <mutex>
 
 typedef std::chrono::high_resolution_clock Time;
 typedef std::chrono::duration<float> fsec;
 typedef std::chrono::milliseconds ms;
 
 int VerbosityLevel = 1;
+std::mutex mutex;
 
 enum ThreadType
 {
@@ -35,7 +37,7 @@ struct ThreadParams
 
 void FillVectorRandom(std::vector<int> &v, int minPossible = 1, int maxPossible = 10)
 {
-    srand(time(NULL));
+    srand((unsigned int)time(NULL));
     for (int i = 0; i < v.size(); i++)
     {
         int a = rand() % (maxPossible - minPossible) + minPossible;
@@ -45,27 +47,60 @@ void FillVectorRandom(std::vector<int> &v, int minPossible = 1, int maxPossible 
 
 DWORD WINAPI FindElementsGreaterThan(void* params)
 {
+    mutex.lock();
+
     ThreadParams* p = (ThreadParams*)params;
-    if(VerbosityLevel > 1)
+    if (VerbosityLevel > 1)
         std::cout << " " << GetCurrentThreadId() << " is speaking.\n";
 
     for (int i = 0; i < p->elementsToProcess; i++)
     {
-        if(VerbosityLevel > 1)
+        if (VerbosityLevel > 1)
             std::cout << (p->arr)[i] << " ";
 
         if ((p->arr)[i] > p->number)
             p->result++;
     }
-    
+
     if (VerbosityLevel > 1)
     {
         std::cout << std::endl; // to close opened line from code above
         std::cout << "Thread " << GetCurrentThreadId() << " found " <<
             p->result << " numbers greater than " << p->number << std::endl;
     }
-    return 0;
 
+    mutex.unlock();
+
+    return 0;
+}
+
+void FindElementsGreaterThan_std(int* arr, int number, int elementsNumber, int& result)
+{
+    mutex.lock();
+
+    if (VerbosityLevel > 1)
+        std::cout << GetCurrentThreadId() << " is speaking.\n";
+
+    result = 0;
+    for (int i = 0; i < elementsNumber; i++)
+    {
+        if (VerbosityLevel > 1)
+            std::cout << arr[i] << " ";
+
+        if (arr[i] > number)
+            result++;
+    }
+
+    if (VerbosityLevel > 1)
+    {
+        std::cout << std::endl;
+        std::cout << GetCurrentThreadId() << " counted " << result
+            << " elements greater then " << number << std::endl;
+    }
+    
+    mutex.unlock();
+
+    return;
 }
 
 int main(int argc, char **argv)
@@ -110,9 +145,19 @@ int main(int argc, char **argv)
                 threadType = std_t;
         }
     }
+
+    vec.resize(optArrayLength);
+    FillVectorRandom(vec);
+
+
     std::cout << "INFO: \n" << "Max number: " << optNumber << std::endl <<
         "Threads num: " << optThreadsNum << std::endl <<
         "Array length: " << optArrayLength << std::endl;
+
+    if (VerbosityLevel > 0)
+        for (int i = 0; i < vec.size(); i++)
+            std::cout << vec[i] << " ";
+    std::cout << std::endl;
 
     if (threadType == winAPI_t)
     {
@@ -124,13 +169,6 @@ int main(int argc, char **argv)
             dwThreadIdArray = new DWORD[optThreadsNum - 1];
             hThreadArray = new HANDLE[optThreadsNum - 1];
             pThreadParams = new ThreadParams[optThreadsNum];
-
-            vec.resize(optArrayLength);
-            FillVectorRandom(vec);
-            if (VerbosityLevel > 0)
-                for (int i = 0; i < vec.size(); i++)
-                    std::cout << vec[i] << " ";
-            std::cout << std::endl;
 
             // Moved it to a separate loop in order to measure the time of the next loop cleanly
             for (int i = 0; i < optThreadsNum; i++)
@@ -181,9 +219,39 @@ int main(int argc, char **argv)
             std::cout << e.what();
         }
     }
-    else if(threadType == std_t)
+    else if (threadType == std_t)
     {
+        int* results = new int[optThreadsNum];
+        int result = 0;
+        std::thread* threads = new std::thread[optThreadsNum];
 
+        int size = optArrayLength / optThreadsNum;
+
+        auto start_time = Time::now();
+        for (int i = 0; i < optThreadsNum; i++)
+        {
+            threads[i] = std::thread(FindElementsGreaterThan_std,
+                vec.data() + size * i,
+                optNumber,
+                size + (i == optThreadsNum-1 ? optArrayLength % optThreadsNum : 0),
+                std::ref(results[i]));
+        }
+
+        for (int i = 0; i < optThreadsNum; i++)
+        {
+            threads[i].join();
+            result += results[i];
+        }
+
+        auto end_time = Time::now();
+        fsec fs = end_time - start_time;
+        ms d = std::chrono::duration_cast<ms>(fs);
+
+        std::cout << "Multi threaded region has finished in " << d.count() << " ms.\n";
+
+        delete[] threads, results;
+
+        std::cout << "Elements greater than " << optNumber << " is " << result << std::endl;
     }
     return 0;
 }
