@@ -5,18 +5,22 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <atomic>
 
 typedef std::chrono::high_resolution_clock Time;
 typedef std::chrono::duration<float> fsec;
 typedef std::chrono::milliseconds ms;
 
 int VerbosityLevel = 1;
+
 std::mutex mutex;
+std::atomic<int> atomicResult;
 
 enum ThreadType
 {
     winAPI_t,
-    std_t
+    std_t,
+    atomic_t
 };
 
 struct ThreadParams
@@ -103,6 +107,38 @@ void FindElementsGreaterThan_std(int* arr, int number, int elementsNumber, int& 
     return;
 }
 
+void FindElementsGreaterThan_atomic(int *arr, int number, int elementsNumber, std::atomic<int>& results)
+{
+    //mutex.lock();
+
+    if (VerbosityLevel > 1)
+        std::cout << GetCurrentThreadId() << " is speaking.\n";
+
+    int localResult = 0;
+    for (int i = 0; i < elementsNumber; i++)
+    {
+        if (VerbosityLevel > 1)
+            std::cout << arr[i] << " ";
+
+        if (arr[i] > number)
+            localResult++;
+    }
+
+    if (VerbosityLevel > 1)
+    {
+        std::cout << std::endl;
+        std::cout << GetCurrentThreadId() << " counted " << localResult
+            << " elements greater then " << number << std::endl;
+    }
+
+    //mutex.unlock();
+
+    localResult += results.load();
+    results.store(localResult);
+
+    return;
+}
+
 int main(int argc, char **argv)
 {
     ThreadType threadType = winAPI_t;
@@ -121,7 +157,7 @@ int main(int argc, char **argv)
                 "[-n <number to search for elements greater than>]\n" <<
                 "[-t <number of threads>]\n" <<
                 "[-num <number of elements to generate and process>]\n" <<
-                "[-threadType <winAPI | std>]\n" <<
+                "[-threadType <winAPI | std | atomic>]\n" <<
                 "[-v <verbosity level>]:\n" <<
                 "v == 0 : only input info and the result with time mewasurement\n" <<
                 "v == 1 : all above plus the generated array will be shown\n" <<
@@ -143,6 +179,8 @@ int main(int argc, char **argv)
                 threadType = winAPI_t;
             else if (type == "std")
                 threadType = std_t;
+            else if (type == "atomic")
+                threadType = atomic_t;
         }
     }
 
@@ -252,6 +290,40 @@ int main(int argc, char **argv)
         delete[] threads, results;
 
         std::cout << "Elements greater than " << optNumber << " is " << result << std::endl;
+    }
+    else if (threadType == atomic_t)
+    {
+        atomicResult.store(0);
+
+        int result = 0;
+        std::thread* threads = new std::thread[optThreadsNum];
+
+        int size = optArrayLength / optThreadsNum;
+
+        auto start_time = Time::now();
+        for (int i = 0; i < optThreadsNum; i++)
+        {
+            threads[i] = std::thread(FindElementsGreaterThan_atomic,
+                                     vec.data() + size * i,
+                                     optNumber,
+                                     size + (i == optThreadsNum - 1 ? optArrayLength % optThreadsNum : 0),
+                                     std::ref(atomicResult));
+        }
+
+        for (int i = 0; i < optThreadsNum; i++)
+        {
+            threads[i].join();
+        }
+
+        auto end_time = Time::now();
+        fsec fs = end_time - start_time;
+        ms d = std::chrono::duration_cast<ms>(fs);
+
+        std::cout << "Multi threaded region has finished in " << d.count() << " ms.\n";
+
+        delete[] threads;
+
+        std::cout << "Elements greater than " << optNumber << " is " << atomicResult << std::endl;
     }
     return 0;
 }
