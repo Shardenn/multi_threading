@@ -271,6 +271,7 @@ int main(int argc, char **argv)
             threads[i] = std::thread(FindElementsGreaterThan_std,
                 vec.data() + size * i,
                 optNumber,
+                // if it is the last thread - add to its array size all extra elements
                 size + (i == optThreadsNum-1 ? optArrayLength % optThreadsNum : 0),
                 std::ref(results[i]));
         }
@@ -306,6 +307,7 @@ int main(int argc, char **argv)
             threads[i] = std::thread(FindElementsGreaterThan_atomic,
                                      vec.data() + size * i,
                                      optNumber,
+                                     // if it is the last thread - add to its array size all extra elements
                                      size + (i == optThreadsNum - 1 ? optArrayLength % optThreadsNum : 0),
                                      std::ref(atomicResult));
         }
@@ -323,7 +325,7 @@ int main(int argc, char **argv)
 
         delete[] threads;
 
-        std::cout << "Elements greater than " << optNumber << " is " << atomicResult << std::endl;
+        std::cout << "Elements greater than " << optNumber << " is " << atomicResult.load() << std::endl;
     }
     return 0;
 }
